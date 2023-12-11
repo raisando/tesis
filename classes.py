@@ -35,12 +35,43 @@ class Edge:
         self.cost        = cost
         self.interdicted = False
 
+# The Interdictor class.
+class Interdictor:
+    def __init__(self,network):
+        """
+        The function initializes an object with a filtration dictionary and a network
+        object.
+
+        :param network: The `network` parameter is an object that represents a networkor graph. It contains information about the nodes and edges of thenetwork
+        """
+        self.filtration = network.edges
+        self.filtration = {x: [] for x in self.filtration}
+        self.net = network
+
+
+    def interdict(self):
+        """
+        The function `interdict` calls the `interdict` method of the `net` object.
+        """
+        self.net.interdict()
+
+    def update_filtration(self):
+        """
+        The function updates the filtration dictionary with the evader cost for each edge in the given path.
+        """
+        path, evader_cost, total_cost = self.net.calculate_evader_cost()
+        for i in range(len(path) - 1):
+            from_node = path[i]
+            to_node = path[i + 1]
+            self.filtration[(from_node,to_node)].append(evader_cost[i])
+
+
 # The `Network` class represents a network of nodes and edges, with methods for
 # adding nodes, connecting nodes with edges, interdicting edges, calculating the
 # cost for an evader to travel from one node to another, and displaying the
 # network.
 class Network:
-    def __init__(self,nodes_per_layer,layers):
+    def __init__(self,nodes_per_layer,layers,f_mean,f_std):
         """
         Constructor for a class that initializes attributesfor a graph data structure.
         """
@@ -51,6 +82,9 @@ class Network:
         self.nodes_per_layer = nodes_per_layer
         self.layers = layers
         self.total_nodes = layers * (nodes_per_layer-1) + 1
+        self.end_node = None
+        self.f_mean = f_mean
+        self.f_std = f_std
 
     def add_node(self, node_id):
         """
@@ -67,6 +101,25 @@ class Network:
         #cost matrix
         new_matrix[:size-1, :size-1] = self.cost_matrix
         self.cost_matrix = new_matrix
+
+    def reset(self):
+        """
+        The `reset` function creates layers of nodes and connects them together with
+        random costs.
+        """
+        # Create layers
+        for layer in range(self.layers):
+            layer_start = layer * (self.nodes_per_layer - 1) + 1
+            layer_end = (layer + 1) * (self.nodes_per_layer - 1) + 1
+
+            # Connect start and end nodes of the layer
+            for i in range(self.nodes_per_layer - 2):
+                intermediate_node = layer_start + i + 1
+                cost =np.random.normal(self.f_mean, self.f_std)
+                self.connect_nodes(layer_start, intermediate_node, cost)
+                self.connect_nodes(intermediate_node, layer_end, cost)
+
+            self.end_node = self.layers * (self.nodes_per_layer - 1) + 1
 
     def connect_nodes(self,from_node_id,to_node_id,cost):
         """
@@ -105,6 +158,11 @@ class Network:
             self.edges[r,c].cost = float('inf')
 
     def interdict(self,to_interdict=[]):
+        """
+        The `interdict` function selects edges to interdict in a graph, either based on a given list of edges or by default interdicting half of the edges in the graph.
+
+        :param to_interdict: The `to_interdict` parameter is a list of edges that you want to interdict. An edge is represented as a tuple of two nodes. For example,if you want to interdict the edge between node A and node B, you would pass`to_interdict=[(A, B)]'
+        """
         if len(to_interdict) == 0:
             K = len(self.nodes)//2
             for i in range(K):
@@ -115,7 +173,7 @@ class Network:
             for edge in to_interdict:
                 self.interdict_edge(edge)
 
-    def calculate_evader_cost(self, start_node, end_node):
+    def calculate_evader_cost(self, start_node=1, end_node=1):
         """
         This function calculates the shortest path and cost from a start node to an end node in a graph using Dijkstra's algorithm.
 
@@ -138,7 +196,7 @@ class Network:
             current_distance, current_node = heapq.heappop(pq)
             visited[current_node]          = True
 
-            if current_node == end_node - 1: #finished
+            if current_node == self.end_node - 1: #finished
                 break
             for neighbor in range(num_nodes): #else:
                 if not visited[neighbor] and cost_matrix[current_node, neighbor] > 0: #each not visited neighbor
@@ -152,16 +210,24 @@ class Network:
 
         # Reconstruct the path
         path    = []
-        current = end_node - 1
+        current = self.end_node - 1
         while current != -1:
             path.append(current + 1)
             current = predecessor[current]
         path.reverse()
-        return path, distance[end_node - 1]
+
+        costs = []
+        for i in range(len(path) - 1):
+            from_node = path[i] - 1
+            to_node = path[i + 1] - 1
+            edge_cost = cost_matrix[from_node, to_node]
+            costs.append(edge_cost)
+
+        return path, costs, distance[self.end_node - 1]
 
 
 
-    def show(self):
+    def show2(self):
         """
         This method creates a directed graph using the nodes and edges provided,
         and then visualizes the graph using networkx library in Python.
@@ -183,7 +249,7 @@ class Network:
         edge_labels = {(u, v): d['cost'] for u, v, d in G.edges(data=True)}
         nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
 
-    def show2(self):
+    def show(self):
         """
         Visualize the graph with a custom layout for multiple layers.
         """
@@ -195,13 +261,14 @@ class Network:
             G.add_edge(edge.from_node, edge.to_node, cost=edge.cost)
 
         # Custom layout for multiple layers
-        pos = self.custom_layout()
+        if not self.pos:
+            self.pos = self.custom_layout()
 
         # Draw the network
-        nx.draw(G, pos, with_labels=True, node_color='lightblue',
+        nx.draw(G, self.pos, with_labels=True, node_color='lightblue',
                 arrows=True, arrowstyle='-|>', arrowsize=10)
-        edge_labels = {(u, v): d['cost'] for u, v, d in G.edges(data=True)}
-        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
+        edge_labels = {(u, v):"{:.2f}".format(d['cost']) for u, v, d in G.edges(data=True)}
+        nx.draw_networkx_edge_labels(G, self.pos, edge_labels=edge_labels)
 
 
 
