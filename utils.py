@@ -31,4 +31,33 @@ def generate_random_graph(n_nodes):
             cost = random.randint(1, 10)
             N.connect_nodes(u, v, cost)
 
+    if N.has_edge(1,n_nodes):
+        N.disconnect_nodes(1,n_nodes)
+
     return N
+
+def generate_random_graph2(nodes_per_layer, layers = 1):
+    N = Network(nodes_per_layer,layers)
+
+    # Define start and end nodes for the entire network
+    start_node = 1
+    end_node = layers * (nodes_per_layer - 1) + 1
+
+    # Add nodes
+    for i in range(start_node, end_node + 1):
+        N.add_node(i)
+
+    # Create layers
+    for layer in range(layers):
+        layer_start = layer * (nodes_per_layer - 1) + 1
+        layer_end = (layer + 1) * (nodes_per_layer - 1) + 1
+
+        # Connect start and end nodes of the layer
+        for i in range(nodes_per_layer - 2):
+            intermediate_node = layer_start + i + 1
+            cost = random.randint(1, 10)
+            N.connect_nodes(layer_start, intermediate_node, cost)
+            N.connect_nodes(intermediate_node, layer_end, cost)
+
+
+    return N, end_node

@@ -40,7 +40,7 @@ class Edge:
 # cost for an evader to travel from one node to another, and displaying the
 # network.
 class Network:
-    def __init__(self):
+    def __init__(self,nodes_per_layer,layers):
         """
         Constructor for a class that initializes attributesfor a graph data structure.
         """
@@ -48,6 +48,9 @@ class Network:
         self.edges       = {}
         self.cost_matrix = np.array([[]])
         self.pos = None
+        self.nodes_per_layer = nodes_per_layer
+        self.layers = layers
+        self.total_nodes = layers * (nodes_per_layer-1) + 1
 
     def add_node(self, node_id):
         """
@@ -77,6 +80,11 @@ class Network:
         self.cost_matrix[from_node_id-1, to_node_id-1] = cost
         #self.cost_matrix[to_node_id-1, from_node_id-1] = cost
 
+    def disconnect_nodes(self,from_node_id,to_node_id):
+        del self.edges[from_node_id,to_node_id]
+        self.cost_matrix[from_node_id-1, to_node_id-1] = 0
+
+
     def has_edge(self,from_node_id,to_node_id):
         """
         This method checks if there is an edge between two nodes in a graph.
@@ -99,7 +107,7 @@ class Network:
     def interdict(self,to_interdict=[]):
         if len(to_interdict) == 0:
             K = len(self.nodes)//2
-            for i in range(random.randint(1,K-1)):
+            for i in range(K):
                 edge = random.choice(list(self.edges.keys()))
                 self.interdict_edge(edge)
 
@@ -174,3 +182,62 @@ class Network:
                 arrows=True, arrowstyle='-|>', arrowsize=10)
         edge_labels = {(u, v): d['cost'] for u, v, d in G.edges(data=True)}
         nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
+
+    def show2(self):
+        """
+        Visualize the graph with a custom layout for multiple layers.
+        """
+        G = nx.DiGraph()
+        for node in self.nodes:
+            G.add_node(node)
+
+        for edge in self.edges.values():
+            G.add_edge(edge.from_node, edge.to_node, cost=edge.cost)
+
+        # Custom layout for multiple layers
+        pos = self.custom_layout()
+
+        # Draw the network
+        nx.draw(G, pos, with_labels=True, node_color='lightblue',
+                arrows=True, arrowstyle='-|>', arrowsize=10)
+        edge_labels = {(u, v): d['cost'] for u, v, d in G.edges(data=True)}
+        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
+
+
+
+    def custom_layout(self):
+        """
+        Create a custom layout for the nodes for multiple layers, with shared nodes between layers.
+        """
+        pos = {}
+        layer_width = 1.0 / self.layers
+        node_height = 1.0 / (self.nodes_per_layer - 2)
+
+        for node in self.nodes:
+            # Calculate which layer the node belongs to
+            layer = (node - 1) // (self.nodes_per_layer - 1)
+            x_offset = layer * layer_width
+
+            if node == 1 or node == len(self.nodes):
+                x_pos = x_offset #if node == 1 else x_offset + layer_width
+                pos[node] = (x_pos, 0.5)
+            else:
+                # Calculate position within the layer
+                within_layer_node_index = (node - 1) % (self.nodes_per_layer - 1)
+
+                # Adjust y-position for shared nodes
+                if within_layer_node_index == 0:
+                    y_pos = 0.5
+                    x_pos = x_offset
+                else:
+                    y_pos = within_layer_node_index * node_height
+                    x_pos = x_offset + layer_width / 2
+
+                pos[node] = (x_pos, y_pos)
+
+        return pos
+
+
+    def test(self):
+        for node in self.nodes:
+            print(node)
