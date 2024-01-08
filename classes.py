@@ -47,6 +47,7 @@ class Interdictor:
         self.filtration = network.edges
         self.filtration = {x: [] for x in self.filtration}
         self.net = network
+        self.k = 0
 
 
     def interdict(self):
@@ -117,6 +118,7 @@ class Network:
                 intermediate_node = layer_start + i + 1
                 cost =np.random.normal(self.f_mean, self.f_std)
                 self.connect_nodes(layer_start, intermediate_node, cost)
+                cost =np.random.normal(self.f_mean, self.f_std)
                 self.connect_nodes(intermediate_node, layer_end, cost)
 
             self.end_node = self.layers * (self.nodes_per_layer - 1) + 1
@@ -164,7 +166,7 @@ class Network:
         :param to_interdict: The `to_interdict` parameter is a list of edges that you want to interdict. An edge is represented as a tuple of two nodes. For example,if you want to interdict the edge between node A and node B, you would pass`to_interdict=[(A, B)]'
         """
         if len(to_interdict) == 0:
-            K = len(self.nodes)//2
+            K = len(self.nodes)//2 - 1
             for i in range(K):
                 edge = random.choice(list(self.edges.keys()))
                 self.interdict_edge(edge)
@@ -225,9 +227,7 @@ class Network:
 
         return path, costs, distance[self.end_node - 1]
 
-
-
-    def show2(self):
+    def show2(self): #DEPRECATED
         """
         This method creates a directed graph using the nodes and edges provided,
         and then visualizes the graph using networkx library in Python.
@@ -248,6 +248,8 @@ class Network:
                 arrows=True, arrowstyle='-|>', arrowsize=10)
         edge_labels = {(u, v): d['cost'] for u, v, d in G.edges(data=True)}
         nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
+
+
 
     def show(self):
         """
