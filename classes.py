@@ -22,7 +22,7 @@ class Node:
 # The Edge class represents an edge between two nodes in a graph, with a cost
 # associated with it.
 class Edge:
-    def __init__(self, from_node, to_node, cost):
+    def __init__(self, from_node, to_node, mu, sigma):
         """
         Constructor for a class that represents a connection between two nodes, with a specified cost.
 
@@ -32,8 +32,43 @@ class Edge:
         """
         self.from_node   = from_node
         self.to_node     = to_node
-        self.cost        = cost
         self.interdicted = False
+
+        self.mu = mu
+        self.sigma = sigma
+
+        self.cost = 0
+
+    def get_satisfaction_from_true_distribution(self):
+        s = np.random.normal(self.mu, self.sigma)
+        #self.n += 1
+        #self.sum_satisfaction += s
+        return s
+
+
+class ThompsonSampler:
+    def __init__(self, mu, sigma):
+        self.prior_mu_of_mu = 0
+        self.prior_sigma_of_mu = 1000
+
+        self.post_mu_of_mu = self.prior_mu_of_mu
+        self.post_sigma_of_mu = self.prior_sigma_of_mu
+
+        self.n = 0
+        self.sum_cost = 0
+
+        self.mu = mu
+        self.sigma = sigma
+
+
+    def get_mu_from_current_distribution(self):
+        samp_mu = np.random.normal(self.post_mu_of_mu, self.post_sigma_of_mu)
+        return samp_mu
+
+    def update_current_distribution(self):
+        self.post_sigma_of_mu = np.sqrt((1 / self.prior_sigma_of_mu**2 + self.n / self.sigma**2)**-1)
+        self.post_mu_of_mu = (self.post_sigma_of_mu**2) * ((self.prior_mu_of_mu / self.prior_sigma_of_mu**2) + (self.sum_cost / self.sigma**2))
+
 
 # The Interdictor class.
 class Interdictor:
@@ -44,28 +79,33 @@ class Interdictor:
 
         :param network: The `network` parameter is an object that represents a networkor graph. It contains information about the nodes and edges of thenetwork
         """
-        self.filtration = network.edges
-        self.filtration = {x: [] for x in self.filtration}
-        self.net = network
-        self.k = 0
+        self.network = network
+        self.edges = network.edges
+        self.ts = {x : ThompsonSampler(y.mu,y.sigma) for x,y in self.edges.items()}
+        self.filtration = {x: [] for x in self.edges}
+        self.k = 0 #budget
 
 
     def interdict(self):
         """
         The function `interdict` calls the `interdict` method of the `net` object.
         """
-        self.net.interdict()
+        self.network.interdict()
 
     def update_filtration(self):
         """
         The function updates the filtration dictionary with the evader cost for each edge in the given path.
         """
-        path, evader_cost, total_cost = self.net.calculate_evader_cost()
+        path, evader_cost, total_cost = self.network.calculate_evader_cost()
         for i in range(len(path) - 1):
             from_node = path[i]
             to_node = path[i + 1]
             self.filtration[(from_node,to_node)].append(evader_cost[i])
-
+            n = len(self.filtration[(from_node,to_node)])
+            suma = sum(self.filtration[(from_node,to_node)])
+            self.ts[(from_node,to_node)].n = n
+            self.ts[(from_node,to_node)].sum_cost = suma
+            self.ts[(from_node,to_node)].update_current_distribution()
 
 # The `Network` class represents a network of nodes and edges, with methods for
 # adding nodes, connecting nodes with edges, interdicting edges, calculating the
@@ -116,14 +156,14 @@ class Network:
             # Connect start and end nodes of the layer
             for i in range(self.nodes_per_layer - 2):
                 intermediate_node = layer_start + i + 1
-                cost =np.random.normal(self.f_mean, self.f_std)
-                self.connect_nodes(layer_start, intermediate_node, cost)
-                cost =np.random.normal(self.f_mean, self.f_std)
-                self.connect_nodes(intermediate_node, layer_end, cost)
+                cost =np.random.normal(self.f_mean - random.randint(1,self.f_mean-1), self.f_std)
+                self.connect_nodes(layer_start, intermediate_node)
+                cost =np.random.normal(self.f_mean - random.randint(1,self.f_mean-1), self.f_std)
+                self.connect_nodes(intermediate_node, layer_end)
 
             self.end_node = self.layers * (self.nodes_per_layer - 1) + 1
 
-    def connect_nodes(self,from_node_id,to_node_id,cost):
+    def connect_nodes(self,from_node_id,to_node_id):
         """
         This function adds an edge between two nodes and updates the cost matrix with the given cost.
 
@@ -131,8 +171,11 @@ class Network:
         :param to_node_id: The ID of the node thatthe edge is connecting to
         :param cost: The cost parameter represents the cost or weight associated with the edge connecting the from_node_id and to_node_id.
         """
-        self.edges[from_node_id,to_node_id] = Edge(from_node_id,to_node_id,cost)
+        e = Edge(from_node_id,to_node_id,mu=random.randint(1,self.f_mean),sigma=1)
+        self.edges[from_node_id,to_node_id] = e
+        cost = e.get_satisfaction_from_true_distribution()
         self.cost_matrix[from_node_id-1, to_node_id-1] = cost
+        e.cost = cost
         #self.cost_matrix[to_node_id-1, from_node_id-1] = cost
 
     def disconnect_nodes(self,from_node_id,to_node_id):
@@ -256,11 +299,13 @@ class Network:
         Visualize the graph with a custom layout for multiple layers.
         """
         G = nx.DiGraph()
+
         for node in self.nodes:
             G.add_node(node)
 
         for edge in self.edges.values():
-            G.add_edge(edge.from_node, edge.to_node, cost=edge.cost)
+            cost = self.cost_matrix[edge.from_node-1, edge.to_node-1]
+            G.add_edge(edge.from_node, edge.to_node, cost=cost)
 
         # Custom layout for multiple layers
         if not self.pos:
