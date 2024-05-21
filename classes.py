@@ -3,6 +3,7 @@ import heapq
 import networkx as nx
 import random
 
+import itertools
 
 # The Node class represents a node in a graph and allows for connecting nodes
 # together.
@@ -22,7 +23,7 @@ class Node:
 # The Edge class represents an edge between two nodes in a graph, with a cost
 # associated with it.
 class Edge:
-    def __init__(self, from_node, to_node, mu, sigma):
+    def __init__(self, from_node: Node, to_node: Node, mu: float, sigma :float):
         """
         Constructor for a class that represents a connection between two nodes, with a specified cost.
 
@@ -39,11 +40,15 @@ class Edge:
 
         self.cost = 0
 
-    def get_satisfaction_from_true_distribution(self):
-        s = np.random.normal(self.mu, self.sigma)
+    def assign_cost_from_true_distribution(self):
+        self.cost = np.random.normal(self.mu, self.sigma)
+
+
+    def get_cost(self) -> float:
+        return self.cost if not self.interdicted else float('inf')
+
         #self.n += 1
         #self.sum_satisfaction += s
-        return s
 
 
 class ThompsonSampler:
@@ -118,7 +123,6 @@ class Network:
         """
         self.nodes       = {}
         self.edges       = {}
-        self.cost_matrix = np.array([[]])
         self.pos = None
         self.nodes_per_layer = nodes_per_layer
         self.layers = layers
@@ -136,14 +140,9 @@ class Network:
         """
         #adds node to dict
         self.nodes[node_id] = Node(node_id)
-        #gets size
-        size = len(self.nodes)
-        new_matrix = np.zeros((size, size))
-        #cost matrix
-        new_matrix[:size-1, :size-1] = self.cost_matrix
-        self.cost_matrix = new_matrix
 
-    def reset(self):
+
+    def create_layers(self):
         """
         The `reset` function creates layers of nodes and connects them together with
         random costs.
@@ -156,14 +155,12 @@ class Network:
             # Connect start and end nodes of the layer
             for i in range(self.nodes_per_layer - 2):
                 intermediate_node = layer_start + i + 1
-                cost =np.random.normal(self.f_mean - random.randint(1,self.f_mean-1), self.f_std)
                 self.connect_nodes(layer_start, intermediate_node)
-                cost =np.random.normal(self.f_mean - random.randint(1,self.f_mean-1), self.f_std)
                 self.connect_nodes(intermediate_node, layer_end)
 
             self.end_node = self.layers * (self.nodes_per_layer - 1) + 1
 
-    def connect_nodes(self,from_node_id,to_node_id):
+    def connect_nodes(self,from_node_id: int,to_node_id:int):
         """
         This function adds an edge between two nodes and updates the cost matrix with the given cost.
 
@@ -173,14 +170,11 @@ class Network:
         """
         e = Edge(from_node_id,to_node_id,mu=random.randint(1,self.f_mean),sigma=1)
         self.edges[from_node_id,to_node_id] = e
-        cost = e.get_satisfaction_from_true_distribution()
-        self.cost_matrix[from_node_id-1, to_node_id-1] = cost
-        e.cost = cost
-        #self.cost_matrix[to_node_id-1, from_node_id-1] = cost
+        e.assign_cost_from_true_distribution()
 
     def disconnect_nodes(self,from_node_id,to_node_id):
         del self.edges[from_node_id,to_node_id]
-        self.cost_matrix[from_node_id-1, to_node_id-1] = 0
+        #self.cost_matrix[from_node_id-1, to_node_id-1] = 0
 
 
     def has_edge(self,from_node_id,to_node_id):
@@ -192,15 +186,17 @@ class Network:
 
         :return: a boolean value indicating whether there is an edge between the twogiven nodes.
         """
-        return self.cost_matrix[from_node_id-1, to_node_id-1] > 0
+        #return self.cost_matrix[from_node_id-1, to_node_id-1] > 0
+        return (from_node_id, to_node_id) in self.edges.keys()
 
-    def interdict_edge(self,edge):
+    def interdict_edge(self,edge: tuple[int,int]):
+        """
+        edge: tuple of indexes
+        """
         r = edge[0]
         c = edge[1]
         if self.has_edge(r,c):
-            self.cost_matrix[r-1,c-1] = float('inf')
             self.edges[r,c].interdicted = True
-            self.edges[r,c].cost = float('inf')
 
     def interdict(self,to_interdict=[]):
         """
@@ -227,9 +223,6 @@ class Network:
         :param end_node: Represents the node where the evader wants to reach. It is the destination node for which the cost of reaching from the `start_node` needs to be calculated
         :return: a tuple containing the path and the distance from the start node to the end node. The path is a list of nodes that represents the shortest path from the start node to the end node. The distance is the total cost of the path.
         """
-        cost_matrix              = self.cost_matrix
-        np.fill_diagonal(cost_matrix, 0)  # No cost for staying at the same node
-
         num_nodes                = len(self.nodes)
         visited                  = [False] * num_nodes
         distance                 = [float('inf')] * num_nodes
@@ -244,14 +237,15 @@ class Network:
             if current_node == self.end_node - 1: #finished
                 break
             for neighbor in range(num_nodes): #else:
-                if not visited[neighbor] and cost_matrix[current_node, neighbor] > 0: #each not visited neighbor
-                    new_distance = current_distance + cost_matrix[current_node, neighbor]
+                edge_key = (current_node + 1, neighbor + 1)  # Adjust for 1-indexed node IDs
+                if edge_key in self.edges and not visited[neighbor]:  # Check edge existence
+                    edge_cost = self.edges[edge_key].cost
+                    new_distance = current_distance + edge_cost
 
-                    if new_distance < distance[neighbor]: #new path is shorter
-                        distance[neighbor]    = new_distance #update
-                        predecessor[neighbor] = current_node #for backtracking
+                    if new_distance < distance[neighbor]:  # new path is shorter
+                        distance[neighbor] = new_distance  # update
+                        predecessor[neighbor] = current_node  # for backtracking
                         heapq.heappush(pq, (new_distance, neighbor))
-                        continue
 
         # Reconstruct the path
         path    = []
@@ -263,12 +257,45 @@ class Network:
 
         costs = []
         for i in range(len(path) - 1):
-            from_node = path[i] - 1
-            to_node = path[i + 1] - 1
-            edge_cost = cost_matrix[from_node, to_node]
+            from_node = path[i]
+            to_node = path[i + 1]
+            edge_cost = self.edges[(from_node, to_node)].cost
             costs.append(edge_cost)
 
         return path, costs, distance[self.end_node - 1]
+
+    def reset_costs(self):
+        for edge in self.edges.values():
+            edge.assign_cost_from_true_distribution()
+
+
+    def find_optimal_interdiction(self, max_interdictions=2):
+        nodes = list(self.network.nodes.keys())
+        all_possible_interdictions = list(itertools.combinations(nodes, max_interdictions))
+        max_cost = 0
+        optimal_interdiction = None
+
+        for interdiction in all_possible_interdictions:
+            self.network.reset_interdictions()  # Restablece las interdicciones
+            self.network.apply_interdictions(interdiction)  # Aplica una nueva configuración de interdicción
+            cost = self.network.calculate_evader_cost()[2]  # Calcula el costo para el evasor
+            if cost > max_cost:
+                max_cost = cost
+                optimal_interdiction = interdiction
+
+        return max_cost, optimal_interdiction
+
+    def reset_interdictions(self):
+        for edge in self.edges.values():
+            edge.interdicted = False
+
+    def apply_interdictions(self, interdiction_config):
+        for node_id in interdiction_config:
+            # Asume que interdict() es un método en la clase Edge para aplicar interdicción
+            if node_id in self.edges:
+                self.edges[node_id].interdict()
+
+
 
     def show2(self): #DEPRECATED
         """
@@ -304,7 +331,9 @@ class Network:
             G.add_node(node)
 
         for edge in self.edges.values():
-            cost = self.cost_matrix[edge.from_node-1, edge.to_node-1]
+            #cost = self.cost_matrix[edge.from_node-1, edge.to_node-1]
+            cost = self.edges[(edge.from_node, edge.to_node)].cost
+
             G.add_edge(edge.from_node, edge.to_node, cost=cost)
 
         # Custom layout for multiple layers
