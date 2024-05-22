@@ -88,14 +88,24 @@ class Interdictor:
         self.edges = network.edges
         self.ts = {x : ThompsonSampler(y.mu,y.sigma) for x,y in self.edges.items()}
         self.filtration = {x: [] for x in self.edges}
-        self.k = 0 #budget
+        self.k = network.interdiction_budget
 
 
     def interdict(self):
         """
-        The function `interdict` calls the `interdict` method of the `net` object.
+        The function `interdict` uses Thompson Sampling to decide which edges to interdict
+        based on the sampled expected costs, constrained by the interdiction budget.
         """
-        self.network.interdict()
+        # Obtener los costos muestreados para cada arista
+        sampled_costs = {edge: ts.get_mu_from_current_distribution() for edge, ts in self.ts.items()}
+
+        # Ordenar las aristas basándose en los costos muestreados
+        # y seleccionar solo hasta 'k' aristas para interdictar, donde 'k' es el presupuesto de interdicción
+        edges_to_interdict = sorted(sampled_costs, key=sampled_costs.get, reverse=True)[:self.k]
+
+        # Llamar al método de interdicción en la red con las aristas seleccionadas
+        self.network.interdict(to_interdict=edges_to_interdict)
+
 
     def update_filtration(self):
         """
@@ -112,12 +122,14 @@ class Interdictor:
             self.ts[(from_node,to_node)].sum_cost = suma
             self.ts[(from_node,to_node)].update_current_distribution()
 
+
+
 # The `Network` class represents a network of nodes and edges, with methods for
 # adding nodes, connecting nodes with edges, interdicting edges, calculating the
 # cost for an evader to travel from one node to another, and displaying the
 # network.
 class Network:
-    def __init__(self,nodes_per_layer,layers,f_mean,f_std):
+    def __init__(self,nodes_per_layer,layers,f_mean,f_std,interdiction_budget=1):
         """
         Constructor for a class that initializes attributesfor a graph data structure.
         """
@@ -130,6 +142,7 @@ class Network:
         self.end_node = None
         self.f_mean = f_mean
         self.f_std = f_std
+        self.interdiction_budget = interdiction_budget
 
     def add_node(self, node_id):
         """
@@ -200,9 +213,12 @@ class Network:
 
     def interdict(self,to_interdict=[]):
         """
-        The `interdict` function selects edges to interdict in a graph, either based on a given list of edges or by default interdicting half of the edges in the graph.
+        The `interdict` function selects edges to interdict in a graph,
+        either based on a given list of edges or by default interdicting half of the edges in the graph.
 
-        :param to_interdict: The `to_interdict` parameter is a list of edges that you want to interdict. An edge is represented as a tuple of two nodes. For example,if you want to interdict the edge between node A and node B, you would pass`to_interdict=[(A, B)]'
+        :param to_interdict: The `to_interdict` parameter is a list of edges that you want to interdict.
+        An edge is represented as a tuple of two nodes.
+        For example,if you want to interdict the edge between node A and node B, you would pass`to_interdict=[(A, B)]'
         """
         if len(to_interdict) == 0:
             K = len(self.nodes)//2 - 1
@@ -269,16 +285,16 @@ class Network:
             edge.assign_cost_from_true_distribution()
 
 
-    def find_optimal_interdiction(self, max_interdictions=2):
-        nodes = list(self.network.nodes.keys())
-        all_possible_interdictions = list(itertools.combinations(nodes, max_interdictions))
+    def find_optimal_interdiction(self):
+        edges = list(self.edges.keys())
+        all_possible_interdictions = list(itertools.combinations(edges, self.interdiction_budget))
         max_cost = 0
         optimal_interdiction = None
 
         for interdiction in all_possible_interdictions:
-            self.network.reset_interdictions()  # Restablece las interdicciones
-            self.network.apply_interdictions(interdiction)  # Aplica una nueva configuración de interdicción
-            cost = self.network.calculate_evader_cost()[2]  # Calcula el costo para el evasor
+            self.reset_interdictions()  # Restablece las interdicciones
+            self.apply_interdictions(interdiction)  # Aplica una nueva configuración de interdicción
+            cost = self.calculate_evader_cost()[2]  # Calcula el costo para el evasor
             if cost > max_cost:
                 max_cost = cost
                 optimal_interdiction = interdiction
@@ -290,10 +306,9 @@ class Network:
             edge.interdicted = False
 
     def apply_interdictions(self, interdiction_config):
-        for node_id in interdiction_config:
-            # Asume que interdict() es un método en la clase Edge para aplicar interdicción
-            if node_id in self.edges:
-                self.edges[node_id].interdict()
+        for edges_tuple in interdiction_config:
+            if edges_tuple in self.edges.keys():
+                self.interdict_edge(edges_tuple)
 
 
 
